@@ -1,0 +1,11 @@
+.Icon
+.DS_Store
+GDCdata
+MANIFEST*
+htseq_h5*
+analysis_data
+EO
+git add .
+git commit -m "Initial commit: README and .gitignore"
+git push -u origin main
+git -C ~/QBIO/qbio_490_tonyyoo remote -v
