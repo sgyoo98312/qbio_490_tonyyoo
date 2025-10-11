@@ -1,0 +1,537 @@
+---
+title: "Introduction to MAF"
+author: Seunggeol(Tony)Yoo
+date: Oct. 10th, 2025
+updated: 9/29/2025
+---
+
+***Deliverables***
+- upload this R Notebook to your GitHub and submit the link to your Repo on Brightspace
+- include ALL graphs or figures created in this assignment in a folder with your R notebook with descriptive file names.
+
+
+We encourage you to work with a partner. Therefore, it is okay if your answers are the same as your partner’s as long as everyone understands it and could explain it in their own words if asked. Each person must individually push their code to Github. *At the top of your R Notebook, write the name of you and your partner(s) as a comment.*
+
+
+***Complete the following coding activity and answer any following questions as comments in your R Notebook***
+
+In this assignment, you will need to use your skills learned in class to demonstrate your understanding of categorical variables and R data structures.
+
+```{r setup}
+
+set.seed(490)
+options(stringsAsFactors = FALSE)
+
+suppressPackageStartupMessages({
+  library(maftools)
+  library(dplyr)
+  library(readr)
+  library(stringr)
+  library(ggplot2)
+  library(survival)
+})
+
+# One figures folder everywhere
+fig_dir  <- "figures"
+dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
+knitr::opts_chunk$set(fig.path = paste0(fig_dir, "/"), fig.width = 9, fig.height = 6, dpi = 150)
+
+# Locate clinical CSV robustly
+base_dir <- "analysis_data"
+cand <- c(file.path(base_dir, "clinical_data.csv"),
+          file.path(base_dir, "brca_clinical_data.csv"),
+          file.path(base_dir, "clinical data.csv"))
+clin_csv <- cand[file.exists(cand)][1]
+if (is.na(clin_csv)) stop("No clinical CSV found in analysis_data/.")
+clinical <- readr::read_csv(clin_csv, show_col_types = FALSE)
+
+# Load the cached MAF object you already created
+maf_rds <- file.path(base_dir, "maf_object.rds")
+if (!file.exists(maf_rds)) stop("analysis_data/maf_object.rds is missing. Save it once, then re-knit.")
+MAF_object <- readRDS(maf_rds)
+
+
+# Make sure data.table is available
+if (!requireNamespace("data.table", quietly = TRUE)) install.packages("data.table")
+library(data.table)
+
+# Convert clinical to data.table (maftools requires this type)
+clinical_dt <- data.table::as.data.table(clinical)
+
+# (Optional but helpful) ensure a barcode column exists
+if (!"Tumor_Sample_Barcode" %in% names(clinical_dt)) {
+  alias <- intersect(names(clinical_dt), c("bcr_patient_barcode","submitter_id","case_submitter_id"))
+  if (length(alias)) {
+    clinical_dt[, Tumor_Sample_Barcode := clinical_dt[[alias[1]]]]
+  }
+}
+
+# Now assign into the MAF object
+MAF_object@clinical.data <- clinical_dt
+
+```
+
+*Pre-Assignment*
+Load all necessary packages, read in the clinical data.csv file you have in your analysis_data folder, and instantiate the MAF_object.
+```{r}
+suppressPackageStartupMessages({ library(data.table); library(dplyr); library(maftools); library(readr) })
+
+# 1) Find your MAF files (adjust search roots if needed)
+roots     <- c("~/490_cluster/Week06_MAF", "~/490_cluster/qbio_490_tonyyoo")
+maf_paths <- unlist(lapply(path.expand(roots), function(d)
+  list.files(d, pattern="\\.maf(\\.gz)?$", recursive=TRUE, full.names=TRUE)))
+stopifnot(length(maf_paths) > 0)
+
+# 2) Read & combine into one data.frame
+maf_df_list <- lapply(maf_paths, function(p) data.table::fread(p, data.table = FALSE))
+
+# 3) Clinical + build MAF object
+clin_csvs <- c("analysis_data/clinical_data.csv",
+               "analysis_data/brca_clinical_data.csv",
+               "analysis_data/clinical data.csv")
+clin_csv  <- clin_csvs[file.exists(clin_csvs)][1]
+stopifnot(!is.na(clin_csv))
+clinical <- readr::read_csv(clin_csv, show_col_types = FALSE)
+
+if (!"Tumor_Sample_Barcode" %in% names(clinical)) {
+  alias <- intersect(names(clinical), c("bcr_patient_barcode","submitter_id","case_submitter_id"))
+  stopifnot(length(alias) > 0)
+  clinical$Tumor_Sample_Barcode <- clinical[[alias[1]]]
+}
+
+MAF_object <- maftools::read.maf(
+  maf  = maf_df,
+  clinicalData = clinical,
+  isTCGA = TRUE,
+  verbose = TRUE
+)
+
+# 4) Cache it for the notebook
+saveRDS(MAF_object, "analysis_data/maf_object.rds")
+
+
+```
+
+
+It's useful to save your MAF_object, so that you don't have to go through the trouble of querying and preparing it everytime. The saveRDS function allows us to save an R object, allowing us to access it directly from our files. 
+```{r}
+#saveRDS(fill in with name of your MAF_object, file = "/path/to/analysis_data/maf_object.rds")
+# ex. saveRDS(MAF_object, file = "/home1/erika/490_cluster/analysis_data/maf_object.rds")
+
+saveRDS(MAF_object, file = file.path(base_dir, "maf_object.rds"))
+```
+
+When you reopen a new R session and want to access your MAF_object, you can use the readRDS function to load the object back into a new variable.
+```{r}
+# --- load the cached MAF object ---
+maf_rds <- file.path(base_dir, "maf_object.rds")
+if (!file.exists(maf_rds)) stop("analysis_data/maf_object.rds is missing. Place your saved MAF object there.")
+MAF_object <- readRDS(maf_rds)
+# ex. MAF_object <- readRDS(file = "/home1/erika/490_cluster/analysis_data/maf_object.rds")
+```
+
+*1*
+Choose a clinical variable (or any variable from clin_rad or clin_drug) to separate your populations into two different groups and rewrite the column or create a new column with that variable as a factor. ***Do not use age or vital_status as your clinical variable.*** Hint: if your variable is continuous, you will need to determine your own cutoffs for the different levels of the factor. If your variable is categorical and has more than two possible values, choose the two that are the most common.
+```{r}
+
+
+stage_col <- "ajcc_pathologic_stage"  # or whatever stage column exists
+clinical <- MAF_object@clinical.data
+
+# Create boolean masks for early vs late
+early_mask <- clinical[[stage_col]] %in% c("Stage I", "Stage IA", "Stage IB", 
+                                            "Stage II", "Stage IIA", "Stage IIB")
+late_mask <- clinical[[stage_col]] %in% c("Stage III", "Stage IIIA", "Stage IIIB", 
+                                           "Stage IIIC", "Stage IV")
+
+# Create the factor column
+clinical$stage_group <- ifelse(early_mask, "Early", 
+                               ifelse(late_mask, "Late", NA))
+clinical$stage_group <- factor(clinical$stage_group, levels = c("Early", "Late"))
+
+# Update MAF object
+MAF_object@clinical.data <- clinical
+```
+
+
+*2*
+Create a co-oncoplot with the top 10-20 (you choose) most mutated genes for the two groups. Pick one that has a large discrepancy in % mutated or type of mutations between the groups and research it. 
+Research it. What is the gene used for? Can you think of any reason for the discrepancy?
+```{r}
+# Get IDs for each stage group (no balancing needed)
+early_ids <- MAF_object@clinical.data %>% 
+  filter(stage_group == "Early") %>% 
+  pull(Tumor_Sample_Barcode)
+
+late_ids <- MAF_object@clinical.data %>% 
+  filter(stage_group == "Late") %>% 
+  pull(Tumor_Sample_Barcode)
+
+# Remove any NA values
+early_ids <- early_ids[!is.na(early_ids)]
+late_ids <- late_ids[!is.na(late_ids)]
+
+cat(sprintf("Early stage samples: %d\n", length(early_ids)))
+cat(sprintf("Late stage samples: %d\n", length(late_ids)))
+
+# Create subset MAF objects directly (no sampling)
+early_maf <- subsetMaf(maf = MAF_object, tsb = early_ids)
+late_maf <- subsetMaf(maf = MAF_object, tsb = late_ids)
+
+# Create co-oncoplot with top 10-20 genes
+coOncoplot(m1 = early_maf, 
+           m2 = late_maf,
+           m1Name = sprintf("Early (I-II) N=%d", length(early_ids)),
+           m2Name = sprintf("Late (III-IV) N=%d", length(late_ids)),
+           genes = NULL,  # This will automatically show top mutated genes
+           removeNonMutated = FALSE)
+
+# Save the plot
+ggsave(file.path(fig_dir, "Q2_coOncoplot_Early_vs_Late.png"), 
+       width = 12, height = 8)
+
+# Get top mutated genes from combined analysis
+top_n <- 15
+all_genes_early <- getGeneSummary(early_maf) %>% 
+  as.data.frame() %>% 
+  arrange(desc(MutatedSamples))
+
+all_genes_late <- getGeneSummary(late_maf) %>% 
+  as.data.frame() %>% 
+  arrange(desc(MutatedSamples))
+
+# Get union of top genes from both groups
+top_genes <- unique(c(
+  head(all_genes_early$Hugo_Symbol, top_n),
+  head(all_genes_late$Hugo_Symbol, top_n)
+))
+top_genes <- head(top_genes, top_n)  # Limit to top_n
+
+cat("\nTop genes to be plotted:\n")
+print(top_genes)
+
+# Create co-oncoplot
+png(file.path(fig_dir, sprintf("T2_coOncoplot_Early_vs_Late_top%d.png", top_n)),
+    width = 2200, height = 1400, res = 200)
+
+coOncoplot(m1 = early_maf, 
+           m2 = late_maf,
+           m1Name = sprintf("Early (I-II) N=%d", length(early_ids_bal)),
+           m2Name = sprintf("Late (III-IV) N=%d", length(late_ids_bal)),
+           genes = top_genes,
+           removeNonMutated = FALSE)
+
+dev.off()
+
+# Compute per-gene frequency difference
+g1 <- getGeneSummary(early_maf) %>% 
+  as.data.frame() %>%
+  select(Hugo_Symbol, Early_n = MutatedSamples)
+
+g2 <- getGeneSummary(late_maf) %>% 
+  as.data.frame() %>%
+  select(Hugo_Symbol, Late_n = MutatedSamples)
+
+n_early <- as.numeric(early_maf@summary[early_maf@summary$ID == "Samples", "summary"])
+n_late <- as.numeric(late_maf@summary[late_maf@summary$ID == "Samples", "summary"])
+
+# Join and calculate differences
+gene_df <- full_join(g1, g2, by = "Hugo_Symbol") %>%
+  mutate(Early_n = ifelse(is.na(Early_n), 0, Early_n),
+         Late_n = ifelse(is.na(Late_n), 0, Late_n),
+         Early_pct = Early_n / n_early * 100,
+         Late_pct = Late_n / n_late * 100,
+         abs_diff = abs(Early_pct - Late_pct)) %>%
+  arrange(desc(abs_diff))
+
+# Show top discrepant genes
+cat("\n=== Top 10 Genes with Largest Mutation Frequency Differences ===\n")
+print(head(gene_df %>% select(Hugo_Symbol, Early_pct, Late_pct, abs_diff), 10))
+
+# Choose gene with substantial mutations in both groups (at least 5 total mutations)
+chosen_gene <- gene_df %>% 
+  filter(Early_n + Late_n >= 5) %>% 
+  slice(1) %>% 
+  pull(Hugo_Symbol)
+
+# If no gene meets criteria, pick the top one
+if (length(chosen_gene) == 0) {
+  chosen_gene <- gene_df$Hugo_Symbol[1]
+}
+
+cat(sprintf("\n=== Chosen Gene for Analysis: %s ===\n", chosen_gene))
+
+chosen_row <- gene_df %>% filter(Hugo_Symbol == chosen_gene)
+print(chosen_row)
+
+cat(sprintf("\nMutation frequency in Early stage: %.2f%% (%d/%d)\n", 
+            chosen_row$Early_pct, chosen_row$Early_n, n_early))
+cat(sprintf("Mutation frequency in Late stage: %.2f%% (%d/%d)\n", 
+            chosen_row$Late_pct, chosen_row$Late_n, n_late))
+cat(sprintf("Absolute difference: %.2f%%\n", chosen_row$abs_diff))
+
+
+# Research notes for the chosen gene: PIK3CA
+#PIK3CA encodes the p110α catalytic subunit of phosphatidylinositol 3-kinase (PI3K), a crucial component of the PI3K/AKT/mTOR signaling pathway. This pathway is fundamental for 
+#Cell growth and proliferation
+# Cell survival and resistance to apoptosis
+# Cell metabolism and protein synthesis
+# Cell motility and invasion
+
+# Possible Reasons for the Higher Mutation Frequency in Early-Stage Tumors comes from favroable prognosis association, surivival bias, clonal evolution, and disntict molecular subtypes such as Luminal A breast cancers (generally less aggressive) and Lower-grade tumors. 
+
+```
+
+
+*3*
+Create a contingency table with your variable and chosen gene. Run a Fisher’s Exact Test between presence of mutations for that gene and your clinical variable. Create and save a mosaic plot. 
+Interpret the output of the Fisher’s Exact Test in terms of the odds ratio and p-value.
+```{r}
+
+# Question 3: Contingency table and Fisher's Exact Test
+
+# chosen gene from Q2 analysis
+chosen_gene <- "PIK3CA"
+
+# Create mutation flag for each sample with PIK3CA mutation
+mutated_samples <- MAF_object@data %>%
+  filter(Hugo_Symbol == chosen_gene) %>%
+  distinct(Tumor_Sample_Barcode) %>%
+  pull()
+
+cat(sprintf("Total samples with %s mutations: %d\n", chosen_gene, length(mutated_samples)))
+
+# Add mutation status to clinical data
+MAF_object@clinical.data$gene_mut <- ifelse(
+  MAF_object@clinical.data$Tumor_Sample_Barcode %in% mutated_samples,
+  "Mutated",
+  "WT"
+)
+
+# Create contingency table (removing NA stage_group values)
+clean_data <- MAF_object@clinical.data %>%
+  filter(!is.na(stage_group))
+
+# Create the contingency table
+cont_table <- table(clean_data$stage_group, clean_data$gene_mut)
+print("\n=== Contingency Table: PIK3CA Mutation × Stage ===")
+print(cont_table)
+print(addmargins(cont_table))
+
+# Run Fisher's Exact Test
+fisher_result <- fisher.test(cont_table)
+print(fisher_result)
+
+# Create and save mosaic plot
+png(file.path(fig_dir, "Q3_mosaic_PIK3CA_vs_Stage.png"), width = 800, height = 600)
+mosaicplot(cont_table, 
+           main = "Mosaic Plot: PIK3CA Mutation vs Cancer Stage",
+           xlab = "Stage Group (Early vs Late)",
+           ylab = "PIK3CA Mutation Status",
+           color = c("lightblue", "salmon"),
+           cex.axis = 1.2)
+dev.off()
+
+# Interpretation
+cat("\n=== Fisher's Exact Test Interpretation ===\n")
+cat(sprintf("Gene analyzed: %s\n", chosen_gene))
+cat(sprintf("Odds Ratio: %.3f\n", fisher_result$estimate))
+cat(sprintf("95%% Confidence Interval: [%.3f, %.3f]\n", 
+            fisher_result$conf.int[1], fisher_result$conf.int[2]))
+cat(sprintf("P-value: %.4f\n", fisher_result$p.value))
+
+cat("\nInterpretation:\n")
+cat("Based on your analysis from Q2:\n")
+cat("- PIK3CA mutations: 35.10% in Early stage vs 30.43% in Late stage\n")
+cat("- This suggests PIK3CA mutations are slightly more common in early-stage disease\n\n")
+
+if (fisher_result$p.value < 0.05) {
+  cat("The p-value < 0.05 indicates this difference is statistically significant.\n")
+  cat("PIK3CA mutations appear to be associated with early-stage breast cancer.\n")
+} else {
+  cat("The p-value > 0.05 indicates this difference is not statistically significant.\n")
+  cat("There is no strong statistical association between PIK3CA mutations and stage.\n")
+}
+
+# Add biological interpretation
+cat("\nBiological context:\n")
+cat("PIK3CA encodes the p110α catalytic subunit of PI3K and is frequently mutated in breast cancer.\n")
+cat("PIK3CA mutations are often considered early driver events in breast cancer development.\n")
+
+# Fisher'S Exact Test Interpretation: 
+#Odds Ratio: 1.234
+#95% Confidence Interval: [0.887, 1.727]
+# P-value: 0.2016
+
+Interpretation:
+#PIK3CA mutations: 35.10% in Early stage vs 30.43% in Late stage. This suggests PIK3CA mutations are slightly more common in early-stage disease. Also, the p-value > 0.05 indicates this difference is not statistically significant. So, one could surmise that there is no strong statistical association between PIK3CA mutations and stage.
+
+#Biological context:
+#PIK3CA encodes the p110α catalytic subunit of PI3K and is frequently mutated in breast cancer.
+#PIK3CA mutations are often considered early driver events in breast cancer development.
+```
+
+
+*4*
+Subset your maf_object based on your chosen clinical variable and create a co-lollipop plot of your chosen gene divided between the two different clinical variable possibilities. Include descriptive names on your plot.
+Do you notice any difference in terms of mutations (e.g. sites, types, number) between the two populations?
+```{r}
+# Question 4: Co-lollipop plot for PIK3CA
+
+# Use PIK3CA as your chosen gene from Q2
+chosen_gene <- "PIK3CA"
+
+# Get the sample barcodes for each stage group
+early_ids <- MAF_object@clinical.data %>%
+  filter(stage_group == "Early") %>%
+  pull(Tumor_Sample_Barcode)
+
+late_ids <- MAF_object@clinical.data %>%
+  filter(stage_group == "Late") %>%
+  pull(Tumor_Sample_Barcode)
+
+# Remove NAs
+early_ids <- early_ids[!is.na(early_ids)]
+late_ids <- late_ids[!is.na(late_ids)]
+
+cat(sprintf("Creating co-lollipop plot for %s:\n", chosen_gene))
+cat(sprintf("Early-stage samples: %d\n", length(early_ids)))
+cat(sprintf("Late-stage samples: %d\n", length(late_ids)))
+
+# Create subset MAF objects
+early_maf <- subsetMaf(maf = MAF_object, tsb = early_ids)
+late_maf <- subsetMaf(maf = MAF_object, tsb = late_ids)
+
+# Create co-lollipop plot
+png(file.path(fig_dir, paste0("Q4_coLollipop_", chosen_gene, "_Early_vs_Late.png")),
+    width = 1800, height = 800, res = 150)
+
+lollipopPlot2(m1 = early_maf, 
+              m2 = late_maf,
+              gene = chosen_gene,
+              m1_name = sprintf("Early Stage (I-II), N=%d", length(early_ids)),
+              m2_name = sprintf("Late Stage (III-IV), N=%d", length(late_ids)),
+              m1_label = "Early Stage",
+              m2_label = "Late Stage")
+
+dev.off()
+
+# Analyze mutation characteristics
+cat(sprintf("\n=== Detailed Mutation Analysis for %s ===\n", chosen_gene))
+
+# Get mutations for each group
+early_gene_muts <- MAF_object@data %>%
+  filter(Hugo_Symbol == chosen_gene, 
+         Tumor_Sample_Barcode %in% early_ids)
+
+late_gene_muts <- MAF_object@data %>%
+  filter(Hugo_Symbol == chosen_gene, 
+         Tumor_Sample_Barcode %in% late_ids)
+
+# Mutation type distribution
+cat("\n--- Mutation Type Distribution ---\n")
+cat("Early Stage (I-II):\n")
+print(table(early_gene_muts$Variant_Classification))
+
+cat("\nLate Stage (III-IV):\n")
+print(table(late_gene_muts$Variant_Classification))
+
+# Number of mutations
+cat("\n--- Total Mutations ---\n")
+cat(sprintf("Early stage: %d mutations in %d unique samples\n", 
+            nrow(early_gene_muts), 
+            length(unique(early_gene_muts$Tumor_Sample_Barcode))))
+cat(sprintf("Late stage: %d mutations in %d unique samples\n", 
+            nrow(late_gene_muts), 
+            length(unique(late_gene_muts$Tumor_Sample_Barcode))))
+
+# Top mutation hotspots
+cat("\n--- Top Mutation Hotspots (Protein Changes) ---\n")
+cat("Early Stage - Top 5:\n")
+early_hotspots <- sort(table(early_gene_muts$HGVSp_Short), decreasing = TRUE)
+print(head(early_hotspots, 5))
+
+cat("\nLate Stage - Top 5:\n")
+late_hotspots <- sort(table(late_gene_muts$HGVSp_Short), decreasing = TRUE)
+print(head(late_hotspots, 5))
+
+# Interpretation
+cat("\n=== Observations ===\n")
+cat("Based on the co-lollipop plot, observe:\n")
+cat("1. Mutation hotspots: Are mutations clustered in the same regions?\n")
+cat("   - PIK3CA typically has hotspots at H1047 and E545 positions\n")
+cat("2. Mutation types: Compare missense vs. truncating mutations between stages\n")
+cat("3. Domain distribution: Note if mutations affect helical or kinase domains differently\n")
+cat("\nFor PIK3CA specifically:\n")
+cat("- H1047R/L mutations activate the kinase domain\n")
+cat("- E545K/E542K mutations are in the helical domain\n")
+cat("- Both are gain-of-function mutations driving PI3K/AKT pathway activation\n")
+
+#=== Observations ===
+#Based on the co-lollipop plot,
+# 1. PIK3CA typically has hotspots at H1047 and E545 positions
+# 2. Mutation types: Compare missense vs. truncating mutations between stages
+# 3. Domain distribution: Note if mutations affect helical or kinase domains differently
+# For PIK3CA specifically:
+# H1047R/L mutations activate the kinase domain
+# E545K/E542K mutations are in the helical domain
+# Both are gain-of-function mutations driving PI3K/AKT pathway activation
+```
+
+
+*5*
+Create your Overall_Survival_Status column and create a mafSurvival KM plot based on mutations in your chosen gene.
+Does there seem to be a difference? Hypothesize why or not based on the other analysis you did with the gene above.
+```{r}
+# Question 5: Survival Analysis for PIK3CA
+
+chosen_gene <- "PIK3CA"
+
+# Create Overall_Survival_Status column
+MAF_object@clinical.data$Overall_Survival_Status <- ifelse(
+  tolower(MAF_object@clinical.data$vital_status) %in% c("dead", "1"),
+  1,  # Death event
+  0   # Alive/censored
+)
+
+# Use the correct column name with underscores
+time_col <- "days_to_last_follow_up"
+
+# Create and save the survival plot
+png(file.path(fig_dir, paste0("Q5_survival_KM_", chosen_gene, ".png")),
+    width = 1200, height = 900, res = 150)
+
+mafSurvival(maf = MAF_object,
+            genes = chosen_gene,
+            time = time_col,
+            Status = "Overall_Survival_Status",
+            isTCGA = TRUE)
+
+dev.off()
+
+cat(sprintf("Survival plot saved to: %s/Q5_survival_KM_%s.png\n", fig_dir, chosen_gene))
+
+# Quick summary for interpretation
+mutated_samples <- MAF_object@data %>%
+  filter(Hugo_Symbol == chosen_gene) %>%
+  distinct(Tumor_Sample_Barcode) %>%
+  pull()
+
+n_mutated <- sum(MAF_object@clinical.data$Tumor_Sample_Barcode %in% mutated_samples)
+n_wt <- sum(!(MAF_object@clinical.data$Tumor_Sample_Barcode %in% mutated_samples))
+
+cat(sprintf("\nPatients with %s mutation: %d\n", chosen_gene, n_mutated))
+cat(sprintf("Patients without %s mutation (WT): %d\n", chosen_gene, n_wt))
+
+cat("\n=== Interpretation ===\n")
+cat("Based on the KM plot, observe if PIK3CA-mutated patients have different survival.\n")
+cat("Given that PIK3CA mutations occur at similar rates in early vs late stages,\n")
+cat("the survival impact may be minimal, suggesting PIK3CA is an early driver that\n")
+cat("doesn't independently determine outcome.\n")
+
+# Based on the KM Plot, there is no significant survival difference. The p-value of 0.696 indicates there is NO statistically significant difference in overall survival between patients with PIK3CA mutations and those without. While both curves follow very similar patterns, with substantial overlap throughout the follow-up period. The curves are nearly superimposed, especially in the early time points.
+
+# Hypothesis for the lack of survival difference: 
+# The absence of a significant survival difference for PIK3CA mutations could be due to several factors, including PIK3CA mutations often serve as a target with PI3K inhibitors, which may neutralize any negative prognostic impact through effective treatment.Heterogeneous impact: PIK3CA mutations might have varying effects depending on the specific mutation type/location, Co-occurring mutations or Cancer subtype (hormone receptor status). Lastly, Early-stage prevalence could have contributed to little survival difference that while PIK3CA mutations are common in ER-positive breast cancers, which generally have better prognosis and more treatment options, this potentially offsets any negative impact.
+
+```
