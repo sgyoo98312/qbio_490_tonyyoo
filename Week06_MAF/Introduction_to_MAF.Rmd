@@ -532,6 +532,9 @@ cat("doesn't independently determine outcome.\n")
 # Based on the KM Plot, there is no significant survival difference. The p-value of 0.696 indicates there is NO statistically significant difference in overall survival between patients with PIK3CA mutations and those without. While both curves follow very similar patterns, with substantial overlap throughout the follow-up period. The curves are nearly superimposed, especially in the early time points.
 
 # Hypothesis for the lack of survival difference: 
-# The absence of a significant survival difference for PIK3CA mutations could be due to several factors, including PIK3CA mutations often serve as a target with PI3K inhibitors, which may neutralize any negative prognostic impact through effective treatment.Heterogeneous impact: PIK3CA mutations might have varying effects depending on the specific mutation type/location, Co-occurring mutations or Cancer subtype (hormone receptor status). Lastly, Early-stage prevalence could have contributed to little survival difference that while PIK3CA mutations are common in ER-positive breast cancers, which generally have better prognosis and more treatment options, this potentially offsets any negative impact.
+# The absence of a significant survival difference for PIK3CA mutations could be due to several factors, 
+# including PIK3CA mutations often serve as a target with PI3K inhibitors, which may neutralize any negative prognostic impact through effective treatment.Heterogeneous impact: PIK3CA mutations might have varying effects depending on the specific mutation type/location, 
+# Co-occurring mutations or Cancer subtype (hormone receptor status). 
+# Lastly, Early-stage prevalence could have contributed to little survival difference that while PIK3CA mutations are common in ER-positive breast cancers, which generally have better prognosis and more treatment options, this potentially offsets any negative impact.
 
 ```
