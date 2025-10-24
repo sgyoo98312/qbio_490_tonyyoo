@@ -1,0 +1,389 @@
+---
+title: "Intro to Transcriptomics"
+author: Seunggeol (Tony) Yoo
+date: Oct.22nd. 2025(Wed)
+updated: 10/18/24
+---
+
+***Deliverables***
+-Upload this R Notebook to your GitHub and submit the link to your Repo on Brightspace.
+-Include any graphs or figures created in this assignment in the folder with your R notebook with descriptive file names.
+
+Since this is an optional partner activity, it is okay if your answers are the same as your partner’s as long as everyone understands it and could explain it in their own words if asked. Each person must individually push their code to Github. *At the top of your R Notebook, write the name of you and your partner(s) as a comment.*
+
+***Complete the following coding activity and answer any following questions as comments in your R Notebook***
+
+In SummarizedExperiment Tutorial, you learned how to manipulate the SummarizedExperiment data structure and turn it into more readable dataframes, saving them as rna_counts, rna_clinical, and rna_genes. In this semi-guided assignment, you will use these dataframes to perform differential expression analysis based on tumor status.
+
+*Pre-Assignment*
+Use knitr function to set your working directory to your analysis_data folder in 490_cluster.
+```{r setup}
+ knitr::opts_knit$set(root.dir = normalizePath("/PATH/TO/analysis_data"))
+```
+
+If DESeq2 is not already installed, install it now
+```{r}
+if (!require("DESeq2", quietly = TRUE))
+BiocManager::install("DESeq2")
+
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+if (!require("EnhancedVolcano", quietly = TRUE))
+    BiocManager::install("EnhancedVolcano")
+
+```
+
+Load in all necessary packages
+```{r}
+
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+
+# Only run if rna_se doesn't exist
+if(!exists("rna_se")) {
+  query <- GDCquery(project = "TCGA-BRCA",
+                    data.category = "Transcriptome Profiling",
+                    data.type = "Gene Expression Quantification",
+                    workflow.type = "STAR - Counts")
+  GDCdownload(query)
+  rna_se <- GDCprepare(query)
+}
+```
+
+
+
+```{r}
+query <- GDCquery(project = "TCGA-BRCA",
+                  data.category = "Transcriptome Profiling",
+                  data.type = "Gene Expression Quantification",
+                  workflow.type = "STAR - Counts")
+```
+
+
+*1*
+Read in the rna_clinical, rna_genes, and rna_counts dataframes which you made in the "SummarizedExperiment Guided Tutorial" R Notebook
+
+```{r}
+
+# Read them back in
+rna_clinical <- read.csv("rna_clinical.csv", row.names = 1)
+rna_genes <- read.csv("rna_genes.csv", row.names = 1)
+rna_counts <- read.csv("rna_counts.csv", row.names = 1)
+
+# Check dimensions
+dim(rna_clinical)
+dim(rna_genes)
+dim(rna_counts)
+```
+
+```{r}
+# Check if files were created
+list.files(pattern = "*.csv")
+
+# Check file sizes to make sure they're not empty
+file.info(c("rna_clinical.csv", "rna_genes.csv", "rna_counts.csv"))$size
+```
+
+
+
+```{r}
+# First, check if all files actually exist
+file.exists(c("rna_clinical.csv", "rna_genes.csv", "rna_counts.csv"))
+
+# Check file sizes
+file.size(c("rna_clinical.csv", "rna_genes.csv", "rna_counts.csv"))
+
+# Try reading rna_clinical without row.names first to see structure
+test_clinical <- read.csv("rna_clinical.csv")
+dim(test_clinical)
+head(colnames(test_clinical))
+
+# Check if rna_se object is still in memory
+exists("rna_se")
+
+# If rna_se exists, check its structure
+if(exists("rna_se")) {
+  dim(colData(rna_se))
+  dim(rowData(rna_se))
+  dim(assays(rna_se)$unstranded)
+}
+```
+
+```{r}
+# rna_clinical_filtered <- rna_clinical
+# 
+# #removing the dots
+# # Convert dots to hyphens in rna_counts column names to match rna_clinical row names
+# colnames(rna_counts) <- gsub("\\.", "-", colnames(rna_counts))
+# 
+# # Now check if they match
+# matching <- sum(rownames(rna_clinical_filtered) %in% colnames(rna_counts))
+# cat("Number of matching samples after conversion:", matching, "out of", nrow(rna_clinical_filtered), "\n")
+# 
+# # Now this should work
+# rna_counts_filtered <- rna_counts[, rownames(rna_clinical_filtered)]
+# 
+# # Continue with gene filtering
+# gene_totals <- rowSums(rna_counts_filtered)
+# keep_genes <- gene_totals >= 1000
+# rna_counts_filtered <- rna_counts_filtered[keep_genes, ]
+# rna_genes_filtered <- rna_genes[rownames(rna_counts_filtered), ]
+# 
+# # Verify dimensions
+# cat("Samples remaining after filtering:", nrow(rna_clinical_filtered), "\n")
+# cat("Genes remaining after expression filter:", nrow(rna_counts_filtered), "\n")
+# cat("Dimensions of filtered counts:", dim(rna_counts_filtered), "\n")
+```
+
+
+
+```{r}
+# Read data
+rna_clinical <- read.csv("rna_clinical.csv", row.names = 1)
+rna_genes <- read.csv("rna_genes.csv", row.names = 1)
+rna_counts <- read.csv("rna_counts.csv", row.names = 1)
+
+# Fix column names
+colnames(rna_counts) <- gsub("\\.", "-", colnames(rna_counts))
+
+# Prepare data
+rna_clinical$definition <- factor(rna_clinical$definition)
+
+# Only filter for definition and age (not PAM50, since normal samples won't have it)
+complete_cases <- complete.cases(rna_clinical[, c("definition", "age_at_index")])
+rna_clinical_filtered <- rna_clinical[complete_cases, ]
+rna_counts_filtered <- rna_counts[, rownames(rna_clinical_filtered)]
+
+# Check that we have both tumor and normal samples
+table(rna_clinical_filtered$definition)
+
+# Filter genes
+gene_totals <- rowSums(rna_counts_filtered)
+keep_genes <- gene_totals >= 1000
+rna_counts_filtered <- rna_counts_filtered[keep_genes, ]
+rna_genes_filtered <- rna_genes[rownames(rna_counts_filtered), ]
+
+# Check dimensions
+dim(rna_clinical_filtered)
+dim(rna_counts_filtered)
+dim(rna_genes_filtered)
+
+```
+
+
+*2*
+In this assignment, you will run differential expression analysis comparing patient samples by whether the sample is from a tumor or normal tissue (this is the definition column in rna_clinical). You will need to choose a variable to control for covariance of: age and/or PAM50 subtype (paper_BRCA_Subtype_PAM50). 
+
+```{r}
+# Check what the row names and column names look like
+head(rownames(rna_clinical_filtered))
+head(colnames(rna_counts))
+
+# Check if they match
+sum(rownames(rna_clinical_filtered) %in% colnames(rna_counts))
+
+# The correct way to filter the counts matrix
+rna_counts_filtered <- rna_counts[, colnames(rna_counts) %in% rownames(rna_clinical_filtered)]
+
+# Alternatively, if the names match but are in different order:
+common_samples <- intersect(rownames(rna_clinical_filtered), colnames(rna_counts))
+rna_clinical_filtered <- rna_clinical_filtered[common_samples, ]
+rna_counts_filtered <- rna_counts[, common_samples]
+
+# Verify dimensions match
+dim(rna_clinical_filtered)
+dim(rna_counts_filtered)
+```
+```{r}
+# Sometimes there are differences like dots vs hyphens
+# Check the first few names from each
+head(rownames(rna_clinical_filtered))
+head(colnames(rna_counts))
+
+# If they differ (e.g., dots vs hyphens), fix them:
+# For example, if clinical has hyphens and counts has dots:
+colnames(rna_counts) <- gsub("\\.", "-", colnames(rna_counts))
+# Or vice versa:
+# rownames(rna_clinical_filtered) <- gsub("-", ".", rownames(rna_clinical_filtered))
+```
+
+
+Manipulate those columns so that they are ready for differential expression analysis (hint: what kind of variables are they? what data type are they by default? do you need to handle unknown values?) Filter out genes with a total expression across all patients less than 1000.
+```{r}
+
+# Check the definition column (tumor vs normal status)
+table(rna_clinical$definition, useNA = "always")
+
+# Convert definition to factor
+rna_clinical$definition <- factor(rna_clinical$definition)
+
+# Check and prepare age variable
+summary(rna_clinical$age_at_index)
+
+# Check and prepare PAM50 subtype variable
+table(rna_clinical$paper_BRCA_Subtype_PAM50, useNA = "always")
+
+# Handle empty strings and convert to factor
+rna_clinical$paper_BRCA_Subtype_PAM50[rna_clinical$paper_BRCA_Subtype_PAM50 == ""] <- NA
+rna_clinical$paper_BRCA_Subtype_PAM50 <- factor(rna_clinical$paper_BRCA_Subtype_PAM50)
+
+# Remove samples with NA values in the variables we need
+complete_cases <- complete.cases(rna_clinical[, c("definition", "age_at_index")])
+rna_clinical_filtered <- rna_clinical[complete_cases, ]
+rna_counts_filtered <- rna_counts[, rownames(rna_clinical_filtered)]
+
+# Replace NA in paper_BRCA_Subtype_PAM50 with a placeholder variable
+rna_clinical_filtered$paper_BRCA_Subtype_PAM50 <- ifelse(is.na(rna_clinical_filtered$paper_BRCA_Subtype_PAM50), "Normal", rna_clinical_filtered$paper_BRCA_Subtype_PAM50) 
+
+# Filter out genes with total expression less than 1000
+gene_totals <- rowSums(rna_counts_filtered)
+keep_genes <- gene_totals >= 1000
+rna_counts_filtered <- rna_counts_filtered[keep_genes, ]
+rna_genes_filtered <- rna_genes[rownames(rna_counts_filtered), ]
+
+cat("Samples remaining after filtering:", nrow(rna_clinical_filtered), "\n")
+cat("Genes remaining after expression filter:", nrow(rna_counts_filtered), "\n")
+
+```
+```{r}
+# Check for variables with no variation after filtering
+table(rna_clinical_filtered$definition)
+table(rna_clinical_filtered$paper_BRCA_Subtype_PAM50)
+summary(rna_clinical_filtered$age_at_index)
+
+# Check if any PAM50 subtype has only one sample
+if(any(table(rna_clinical_filtered$paper_BRCA_Subtype_PAM50) == 1)) {
+  cat("Warning: Some PAM50 subtypes have only 1 sample\n")
+  print(table(rna_clinical_filtered$paper_BRCA_Subtype_PAM50))
+}
+
+# Check for NAs or zero variance
+cat("\nNumber of unique age values:", length(unique(rna_clinical_filtered$age_at_index)), "\n")
+cat("Variance in age:", var(rna_clinical_filtered$age_at_index, na.rm = TRUE), "\n")
+```
+
+
+*3*
+Perform the differential expression analysis, All you need to do is fill in the appropriate # terms
+```{r}
+# 3. Perform differential expression analysis
+
+dds <- DESeqDataSetFromMatrix(countData = rna_counts_filtered,
+                              colData = rna_clinical_filtered,
+                              design = ~ age_at_index + definition)
+
+# Run DESeq2 (this will take 5-10 minutes)
+dds_obj <- DESeq(dds)
+
+# Check result names
+resultsNames(dds_obj)
+
+# Extract results comparing Primary solid Tumor vs Solid Tissue Normal
+results <- results(dds_obj, 
+                   format = "DataFrame", 
+                   contrast = c("definition", "Primary solid Tumor", "Solid Tissue Normal"))
+
+# Convert to data frame
+results <- data.frame(results)
+
+
+
+#dds <- DESeqDataSetFromMatrix(countData = #fill in,
+                             # colData = #fill in,
+                            #  design= #fill in)
+
+#dds_obj <- DESeq(dds)
+
+#resultsNames(dds_obj)
+
+#results <- results(dds_obj, format = "DataFrame", contrast = c(#variable name, #numerator , #denominator))
+
+#results <- data.frame(results)
+```
+
+Prepare results dataframe for EnhancedVolcano plotting. Add two columns, "-log10(padj)" and "gene_name". Fill in these columns appropriately.
+```{r}
+# Extract results for Primary solid Tumor vs Solid Tissue Normal
+results <- results(dds_obj, 
+                   format = "DataFrame", 
+                   contrast = c("definition", "Primary solid Tumor", "Solid Tissue Normal"))
+
+# Convert to data frame
+results <- data.frame(results)
+
+# Prepare results for volcano plot
+results$`-log10(padj)` <- -log10(results$padj)
+results$gene_id <- rownames(results)
+results$gene_name <- rna_genes_filtered[results$gene_id, "gene_name"]
+
+# Use gene_id as fallback for missing gene names
+na_names <- is.na(results$gene_name) | results$gene_name == ""
+results$gene_name[na_names] <- results$gene_id[na_names]
+
+# Check how many significant genes
+sig_genes <- sum(results$padj < 0.05, na.rm = TRUE)
+cat("Significantly differentially expressed genes:", sig_genes, "\n")
+
+# View top results
+head(results[order(results$padj), ])
+```
+
+*4*
+Now we will use the EnhancedVolcano package to plot our results. The code is already completed and should run without adjustment if all code up to here is correct.
+```{r}
+# 4. Create Enhanced Volcano Plot
+volcano_plot <- EnhancedVolcano(results,
+                                lab = results$gene_name,
+                                x = 'log2FoldChange',
+                                y = '-log10(padj)',
+                                title = 'Sample Definition: Tumor vs Normal Tissue',
+                                pointSize = 1.0,
+                                labSize = 5.0,
+                                pCutoff = 0.05,
+                                FCcutoff = 1.0)
+
+print(volcano_plot)
+
+# Save the plot
+ggsave("volcano_plot_tumor_vs_normal.png", 
+       plot = volcano_plot,
+       width = 10, 
+       height = 8, 
+       dpi = 300)
+```
+
+*5*
+# Explain what genes from each part of the Volcano Plot mean in terms of their significance and up/down regulation. 
+# 5. Interpretation of Volcano Plot regions
+
+top-right genes: 
+# These genes are significantly upregulated in tumor samples compared to normal tissue
+# (padj < 0.05 and log2FoldChange > 1). These represent potential oncogenes or 
+# tumor-promoting factors that could be therapeutic targets.
+
+bottom-right genes: 
+# These genes show upregulation in tumor samples but are not statistically significant
+# (padj >= 0.05 and log2FoldChange > 0). They may require larger sample sizes 
+# to confirm their differential expression.
+
+top-left genes: 
+# These genes are significantly downregulated in tumor samples compared to normal tissue
+# (padj < 0.05 and log2FoldChange < -1). These could be tumor suppressor genes 
+# or genes essential for normal tissue function that are lost in cancer.
+
+bottom-left genes: 
+# These genes show downregulation in tumor samples but are not statistically significant
+# (padj >= 0.05 and log2FoldChange < 0). The effect is too weak or variable to draw conclusions.
+
+top-middle genes: 
+# These genes show statistically significant differential expression but with small 
+# fold changes (padj < 0.05 and -1 < log2FoldChange < 1). While statistically 
+# significant, the biological impact may be modest.
+
+bottom-middle genes: 
+# These genes show minimal change in expression and are not statistically significant
+# (padj >= 0.05 and log2FoldChange near 0). These are essentially unchanged 
+# between tumor and normal conditions.
+
+Save the picture of the volcano plot (using either ggsave() or right clicking and manually downloading the image and push this .Rmd and the image to GitHub)
