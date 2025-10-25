@@ -9,3 +9,5 @@ git add .
 git commit -m "Initial commit: README and .gitignore"
 git push -u origin main
 git -C ~/QBIO/qbio_490_tonyyoo remote -v
+*.csv
+analysis_data.zip
